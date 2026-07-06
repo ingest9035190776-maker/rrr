@@ -4,9 +4,4 @@ torch==2.0.1
 sentencepiece==0.1.99
 python-dotenv==1.0.0
 flask==2.3.2
-gunicorn==21.2.0pytelebot
-transformers
-torch
-sentencepiece
-python-dotenv
-flask
+gunicorn==21.2.0
