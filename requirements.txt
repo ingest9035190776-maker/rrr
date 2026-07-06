@@ -1,6 +1,6 @@
 pytelegrambotapi==4.34.0
 transformers==4.46.0
-torch==2.5.1
+torch
 sentencepiece==0.2.0
 python-dotenv==1.0.0
 flask==3.0.0
