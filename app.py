@@ -1,6 +1,7 @@
 import os
 import json
 import threading
+import time
 import telebot
 from telebot import types
 from flask import Flask
@@ -25,34 +26,9 @@ if not TELEGRAM_TOKEN:
         pass
 
 if not TELEGRAM_TOKEN:
-    raise ValueError("""
-    ❌ ТОКЕН НЕ НАЙДЕН!
-    Создайте файл .env с TELEGRAM_TOKEN=ваш_токен
-    """)
+    raise ValueError("❌ ТОКЕН НЕ НАЙДЕН!")
 
 print(f"✅ Токен загружен!")
-
-# ================= ЛЕГКОВЕСНАЯ МОДЕЛЬ (ПРОВЕРЕННАЯ) =================
-# Используем модель от SberDevices, которая точно доступна
-MODEL_NAME = "ai-forever/rudialogpt-tiny"
-
-print(f"📥 Загрузка модели {MODEL_NAME}...")
-
-# Загружаем токенизатор
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-
-# Устанавливаем pad_token, если его нет
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-# Загружаем модель в режиме CPU (экономит память)
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
-    torch_dtype=torch.float32,  # Используем float32 для стабильности
-    low_cpu_mem_usage=True       # Оптимизация памяти
-)
-
-print("✅ Модель загружена!")
 
 # ================= ИНИЦИАЛИЗАЦИЯ БОТА =================
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
@@ -85,57 +61,86 @@ def save_history(history):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
-# ================= ГЕНЕРАЦИЯ ОТВЕТА =================
-def generate_response(user_message):
-    """Генерирует ответ с помощью легковесной модели"""
-    
-    history = load_history()
-    context = " ".join(history[-6:]) if history else ""
-    
-    # Формируем промпт
-    prompt = f"{context} Пользователь: {user_message} Ассистент:"
-    
-    # Токенизируем
-    inputs = tokenizer.encode(
-        prompt, 
-        return_tensors="pt", 
-        truncation=True, 
-        max_length=256  # Уменьшаем для экономии памяти
-    )
-    
-    # Генерируем ответ
-    with torch.no_grad():
-        outputs = model.generate(
-            inputs,
-            max_length=150,
-            num_return_sequences=1,
-            temperature=0.8,
-            top_p=0.9,
-            do_sample=True,
-            pad_token_id=tokenizer.eos_token_id,
-            repetition_penalty=1.2
-        )
-    
-    # Декодируем
-    full_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    
-    # Извлекаем ответ ассистента
-    if "Ассистент:" in full_response:
-        response = full_response.split("Ассистент:")[-1].strip()
-    else:
-        response = full_response.replace(prompt, "").strip()
-    
-    if len(response) < 2:
-        response = "Я вас слушаю! Расскажите подробнее."
-    
-    # Сохраняем в историю
-    history.append(f"Пользователь: {user_message}")
-    history.append(f"Ассистент: {response}")
-    save_history(history)
-    
-    return response
+# ================= ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ДЛЯ МОДЕЛИ =================
+model = None
+tokenizer = None
+model_loaded = False
 
-# ================= ОБРАБОТЧИКИ КОМАНД =================
+def load_model():
+    """Загружает модель в фоновом потоке"""
+    global model, tokenizer, model_loaded
+    
+    MODEL_NAME = os.getenv('MODEL_NAME', "ai-forever/rudialogpt-tiny")
+    print(f"📥 Начинаю загрузку модели {MODEL_NAME} в фоновом режиме...")
+    
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_NAME,
+            torch_dtype=torch.float32,
+            low_cpu_mem_usage=True
+        )
+        model_loaded = True
+        print(f"✅ Модель {MODEL_NAME} успешно загружена!")
+    except Exception as e:
+        print(f"❌ Ошибка загрузки модели: {e}")
+        model_loaded = False
+
+def generate_response(user_message):
+    """Генерирует ответ, если модель загружена"""
+    global model, tokenizer, model_loaded
+    
+    if not model_loaded:
+        return "⏳ Модель еще загружается. Подождите немного и попробуйте снова!"
+    
+    try:
+        history = load_history()
+        context = " ".join(history[-6:]) if history else ""
+        
+        prompt = f"{context} Пользователь: {user_message} Ассистент:"
+        
+        inputs = tokenizer.encode(
+            prompt, 
+            return_tensors="pt", 
+            truncation=True, 
+            max_length=256
+        )
+        
+        with torch.no_grad():
+            outputs = model.generate(
+                inputs,
+                max_length=150,
+                num_return_sequences=1,
+                temperature=0.8,
+                top_p=0.9,
+                do_sample=True,
+                pad_token_id=tokenizer.eos_token_id,
+                repetition_penalty=1.2
+            )
+        
+        full_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        if "Ассистент:" in full_response:
+            response = full_response.split("Ассистент:")[-1].strip()
+        else:
+            response = full_response.replace(prompt, "").strip()
+        
+        if len(response) < 2:
+            response = "Я вас слушаю! Расскажите подробнее."
+        
+        history.append(f"Пользователь: {user_message}")
+        history.append(f"Ассистент: {response}")
+        save_history(history)
+        
+        return response
+    except Exception as e:
+        print(f"Ошибка генерации: {e}")
+        return "😅 Произошла ошибка при генерации ответа."
+
+# ================= ОБРАБОТЧИКИ КОМАНД (без изменений) =================
 @bot.message_handler(commands=['start', 'help'])
 def start(message):
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
@@ -153,7 +158,7 @@ def start(message):
         "/done <номер> - отметить дело выполненным\n"
         "/delete <номер> - удалить дело\n"
         "/clear - очистить весь список\n\n"
-        "🤖 Я отвечаю с помощью легковесной ИИ-модели!",
+        "🤖 Модель загружается в фоновом режиме. Подождите 1-2 минуты!",
         reply_markup=markup
     )
 
@@ -266,35 +271,21 @@ def handle_message(message):
         return
     
     bot.send_chat_action(message.chat.id, 'typing')
-    
-    try:
-        reply = generate_response(message.text)
-    except Exception as e:
-        print(f"Ошибка генерации: {e}")
-        reply = "😅 Извини, я немного устал. Давай еще раз?"
-    
+    reply = generate_response(message.text)
     bot.reply_to(message, reply)
 
 # ================= БИЗНЕС-СООБЩЕНИЯ =================
 @bot.business_message_handler(func=lambda message: True)
 def handle_business_message(message):
-    """Обработка сообщений из бизнес-аккаунта"""
     if not message.text:
         return
     
     bot.send_chat_action(message.chat.id, 'typing')
-    
-    try:
-        reply = generate_response(message.text)
-    except Exception as e:
-        print(f"Ошибка генерации бизнес-сообщения: {e}")
-        reply = "😅 Извини, я немного устал. Давай еще раз?"
-    
+    reply = generate_response(message.text)
     bot.reply_to(message, f"🏢 {reply}")
 
 @bot.business_connection_handler()
 def handle_business_connection(connection):
-    """Обработчик подключения бизнес-аккаунта"""
     print(f"✅ Бизнес-аккаунт подключен: {connection.user_id}")
 
 # ================= ВЕБ-СЕРВЕР ДЛЯ RENDER =================
@@ -306,19 +297,22 @@ def health_check():
 
 @flask_app.route('/health')
 def health_check_detailed():
-    return {"status": "ok", "model": MODEL_NAME}, 200
+    status = "loaded" if model_loaded else "loading"
+    return {"status": status, "model": os.getenv('MODEL_NAME', 'unknown')}, 200
 
 # ================= ЗАПУСК =================
 if __name__ == '__main__':
-    # Запускаем веб-сервер для Render
+    # 1. СНАЧАЛА запускаем веб-сервер, чтобы Render увидел порт
     port = int(os.environ.get('PORT', 10000))
     threading.Thread(
         target=lambda: flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
     ).start()
+    print(f"🚀 Веб-сервер запущен на порту {port}")
     
-    print(f"🚀 Бот запущен на порту {port}")
-    print(f"🧠 Модель: {MODEL_NAME}")
-    print("📋 Бот готов к работе!")
+    # 2. ПОТОМ запускаем загрузку модели в отдельном потоке
+    threading.Thread(target=load_model, daemon=True).start()
+    print("📥 Модель начинает загружаться в фоне...")
     
-    # Запускаем бота
+    # 3. ЗАПУСКАЕМ бота
+    print("🤖 Бот запускается...")
     bot.infinity_polling()
