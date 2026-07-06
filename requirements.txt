@@ -1,7 +1,7 @@
-pytelebot
-transformers
-torch
-sentencepiece
-python-dotenv
-flask
-gunicorn
+pytelegrambotapi==4.34.0
+transformers==4.30.0
+torch==2.5.1
+sentencepiece==0.2.0
+python-dotenv==1.0.0
+flask==3.0.0
+gunicorn==21.2.0
