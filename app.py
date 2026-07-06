@@ -64,4 +64,26 @@ HISTORY_FILE = "chat_history.json"
 
 if __name__ == "__main__":
     print("🤖 Бот запущен!")
+    
+    # ... ваш код с ботом (импорты, настройки, хендлеры) ...
+
+# Добавляем простой веб-сервер для здоровья
+from flask import Flask
+
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def health_check():
+    return "🤖 Бот работает и слушает порт!", 200
+
+if __name__ == '__main__':
+    import threading
+    import os
+
+    # Запускаем веб-сервер в отдельном потоке, чтобы не блокировать бота
+    port = int(os.environ.get('PORT', 10000))
+    threading.Thread(target=lambda: flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)).start()
+    
+    print(f"🤖 Бот запущен и слушает веб-порт {port}")
+    # Запускаем самого бота
     bot.infinity_polling()
