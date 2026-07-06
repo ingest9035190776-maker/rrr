@@ -1,5 +1,5 @@
 pytelegrambotapi==4.34.0
-transformers==4.46.0
+transformers
 torch
 sentencepiece==0.2.0
 python-dotenv==1.0.0
