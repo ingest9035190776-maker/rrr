@@ -32,11 +32,11 @@ if not TELEGRAM_TOKEN:
 
 print(f"✅ Токен загружен!")
 
-# ================= ЛЕГКОВЕСНАЯ МОДЕЛЬ =================
-# Используем tiny-модель для экономии памяти (~100 МБ)
-MODEL_NAME = "cointegrated/ru-gpt-tiny"
+# ================= ЛЕГКОВЕСНАЯ МОДЕЛЬ (ПРОВЕРЕННАЯ) =================
+# Используем модель от SberDevices, которая точно доступна
+MODEL_NAME = "ai-forever/rudialogpt-tiny"
 
-print(f"📥 Загрузка легковесной модели {MODEL_NAME}...")
+print(f"📥 Загрузка модели {MODEL_NAME}...")
 
 # Загружаем токенизатор
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -279,6 +279,9 @@ def handle_message(message):
 @bot.business_message_handler(func=lambda message: True)
 def handle_business_message(message):
     """Обработка сообщений из бизнес-аккаунта"""
+    if not message.text:
+        return
+    
     bot.send_chat_action(message.chat.id, 'typing')
     
     try:
