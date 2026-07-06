@@ -1,0 +1,4 @@
+pytelegrambotapi
+transformers
+torch
+sentencepiece
