@@ -2,3 +2,5 @@ pytelegrambotapi
 transformers
 torch
 sentencepiece
+python-dotenv
+flask
