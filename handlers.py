@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from config import Config
 from storage import Database
 from ai import AIModel, get_compliment, get_joke, get_riddle
-from keyboards import main_menu, mode_selection, confirm_clear
+from keyboards import main_menu, feeding_volume_keyboard, back_to_menu_keyboard, mode_selection, confirm_clear
 
 class Handlers:
     def __init__(self, bot: telebot.TeleBot, db: Database, ai: AIModel):
@@ -36,7 +36,7 @@ class Handlers:
         self.bot.message_handler(commands=['feedchart'])(self.feeding_chart)
         self.bot.message_handler(commands=['clearfeeding'])(self.clear_feeding)
         
-        # Кнопки
+        # Кнопки главного меню
         self.bot.message_handler(func=lambda m: m.text == "📋 Список дел")(self.list_todos)
         self.bot.message_handler(func=lambda m: m.text == "➕ Добавить дело")(self.add_todo_prompt)
         self.bot.message_handler(func=lambda m: m.text == "✅ Выполнено")(self.done_prompt)
@@ -51,6 +51,11 @@ class Handlers:
         self.bot.message_handler(func=lambda m: m.text == "🎭 Сменить режим")(self.change_mode_prompt)
         self.bot.message_handler(func=lambda m: m.text == "📚 Помощь")(self.show_help)
         
+        # Кнопки кормлений (объемы)
+        self.bot.message_handler(func=lambda m: m.text and m.text.endswith(" мл"))(self.feeding_volume_button)
+        self.bot.message_handler(func=lambda m: m.text == "✏️ Свой объем")(self.feeding_custom_volume)
+        self.bot.message_handler(func=lambda m: m.text == "🔙 Назад в меню")(self.go_back_to_menu)
+        
         # Обработка обычных сообщений
         self.bot.message_handler(func=lambda m: True)(self.handle_message)
         
@@ -64,7 +69,7 @@ class Handlers:
         mode_name = Config.MODES.get(mode, Config.MODES["family"])["name"]
         
         greeting = f"""
-👋 **Привет! Я {Config.BOT_NAME}** {Config.BOT_EMOJI}
+👋 **Привет! Я семейный помощник**
 
 🎭 **Текущий режим:** {mode_name}
 
@@ -72,7 +77,7 @@ class Handlers:
 📋 Управляйте общим списком дел
 🎮 Играйте и развлекайтесь
 
-**Используй кнопки ниже или команды!**
+**Используй кнопки ниже!**
         """
         self.bot.reply_to(message, greeting, parse_mode="Markdown", reply_markup=main_menu())
     
@@ -186,7 +191,52 @@ class Handlers:
             self.bot.reply_to(message, "❌ Объем должен быть числом.\nПример: /feed 120")
     
     def add_feeding_prompt(self, message):
-        self.bot.reply_to(message, "✏️ Напиши объем в мл:\n/feed 120\n\nМожно добавить комментарий:\n/feed 120 отлично поела")
+        """Показывает клавиатуру с объемами"""
+        chat_id = message.chat.id
+        self.bot.send_message(
+            chat_id,
+            "🍼 **Выбери объем кормления:**\n\nИли напиши свой объем в миллилитрах (например, 130)",
+            reply_markup=feeding_volume_keyboard(),
+            parse_mode="Markdown"
+        )
+    
+    def feeding_volume_button(self, message):
+        """Обработчик кнопок с объемом (50 мл, 100 мл и т.д.)"""
+        chat_id = message.chat.id
+        ml = int(message.text.replace(" мл", "").strip())
+        
+        self.db.add_feeding(chat_id, ml, "")
+        
+        self.bot.reply_to(
+            message,
+            f"✅ Записано кормление: **{ml} мл**\n🕐 {datetime.now().strftime('%H:%M')}",
+            parse_mode="Markdown"
+        )
+        
+        self.bot.send_message(
+            chat_id,
+            "👆 Выберите следующее действие:",
+            reply_markup=main_menu()
+        )
+    
+    def feeding_custom_volume(self, message):
+        """Обработчик кнопки 'Свой объем'"""
+        chat_id = message.chat.id
+        self.bot.send_message(
+            chat_id,
+            "✏️ **Напиши объем в миллилитрах:**\n\nПример: `130`",
+            reply_markup=back_to_menu_keyboard(),
+            parse_mode="Markdown"
+        )
+    
+    def go_back_to_menu(self, message):
+        """Возврат в главное меню"""
+        chat_id = message.chat.id
+        self.bot.send_message(
+            chat_id,
+            "👆 Главное меню:",
+            reply_markup=main_menu()
+        )
     
     def show_feeding(self, message):
         chat_id = message.chat.id
@@ -246,7 +296,6 @@ class Handlers:
             self.bot.reply_to(message, "📭 Нет данных для графика.")
             return
         
-        # Строим график
         dates = list(daily_data.keys())
         values = list(daily_data.values())
         
@@ -272,6 +321,7 @@ class Handlers:
         self.bot.send_photo(message.chat.id, buf, caption="📈 **Динамика кормлений за последние 7 дней**", parse_mode="Markdown")
     
     def clear_feeding(self, message):
+        chat_id = message.chat.id
         self.bot.reply_to(message, "⚠️ Удалить ВСЕ записи кормлений?", reply_markup=confirm_clear())
     
     # ================= РАЗВЛЕЧЕНИЯ =================
@@ -338,6 +388,26 @@ class Handlers:
             self.bot.reply_to(message, f"❓ Загадка: {question}\n\nОтправь свой ответ!")
             return
         
+        # Проверяем, не является ли сообщение числом (свой объем)
+        if message.text.isdigit() and not message.text.startswith('/'):
+            ml = int(message.text)
+            if 10 <= ml <= 500:
+                self.db.add_feeding(chat_id, ml, "")
+                self.bot.reply_to(
+                    message,
+                    f"✅ Записано кормление: **{ml} мл**\n🕐 {datetime.now().strftime('%H:%M')}",
+                    parse_mode="Markdown"
+                )
+                self.bot.send_message(
+                    chat_id,
+                    "👆 Выберите следующее действие:",
+                    reply_markup=main_menu()
+                )
+                return
+            else:
+                self.bot.reply_to(message, "❌ Объем должен быть от 10 до 500 мл.")
+                return
+        
         # Генерация ответа через ИИ
         mode = self.db.get_mode(chat_id)
         self.bot.send_chat_action(message.chat.id, 'typing')
@@ -357,7 +427,6 @@ class Handlers:
                 self.bot.edit_message_text(f"✅ Режим изменен на **{mode_name}**!", chat_id, call.message.message_id, parse_mode="Markdown")
         
         elif call.data == "clear_yes":
-            # Очищаем дела и кормления
             self.db.clear_todos(chat_id)
             self.db.clear_feedings(chat_id)
             self.bot.answer_callback_query(call.id, "✅ Все данные очищены!")
